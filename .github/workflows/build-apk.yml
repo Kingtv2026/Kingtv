@@ -1,0 +1,62 @@
+name: Construire l'APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Extraire le code
+        run: |
+          ZIP=$(ls -t iptv-player*.zip | head -1)
+          unzip -o -q "$ZIP" -d code
+
+      - name: Créer le projet React Native (version TV)
+        run: |
+          npx --yes @react-native-community/cli@latest init IptvPlayer \
+            --template @react-native-tvos/template-tv \
+            --directory build-app \
+            --skip-git-init \
+            --install-pods false \
+            --pm npm
+
+      - name: Ajouter le code de l'app
+        working-directory: build-app
+        run: |
+          npm install @react-navigation/native @react-navigation/native-stack react-native-screens react-native-safe-area-context react-native-video @react-native-async-storage/async-storage
+          cp ../code/iptv-player/App.tsx ./App.tsx
+          rm -rf src && cp -r ../code/iptv-player/src ./src
+          node ../code/iptv-player/scripts/patch-android.js .
+
+      - name: Compiler l'APK
+        working-directory: build-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Publier l'APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Version ${{ github.run_number }}
+          files: build-app/android/app/build/outputs/apk/release/app-release.apk
